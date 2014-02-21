@@ -11,6 +11,8 @@ namespace COMP28112ex2
 {
     class Program
     {
+        const int MAX_ATTEMPTS = 5;
+        const int TIMEOUT = 5000;
         static int requestID;
         static String username;
         static String password;
@@ -62,25 +64,31 @@ namespace COMP28112ex2
             request.Method = "PUT";
             request.ContentType = "text/xml";
             request.Accept = "application/xml";
+            request.Timeout = TIMEOUT;
             //request.ContentLength = arr.Length;
             Stream dataStream = request.GetRequestStream();
             dataStream.Write(arr, 0, arr.Length);
             dataStream.Close();
-            HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+
+            //everything past here is a huge mess
+            HttpWebResponse response = null;
+            int attempts = 1;
+            try
+            {
+                response = (HttpWebResponse)request.GetResponse();
+            }
+            catch (WebException e)
+            {
+                throw new WebException("The server is unavailable.");
+            }
             if (response.StatusCode == HttpStatusCode.OK)
             {
-                
 
-
-            }
-            else if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
-            {
-                throw new Exception(response.StatusCode + ": " + response.StatusDescription);
             }
             else
                 throw new Exception(response.StatusCode.ToString());
 
-            string returnString = response.StatusCode.ToString();
+            string returnString = response.StatusCode.ToString() + ", " + response.ResponseUri.ToString();
             Console.WriteLine(returnString);
         }
 
