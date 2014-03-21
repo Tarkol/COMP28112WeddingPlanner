@@ -11,8 +11,8 @@ namespace COMP28112ex2
 {
   class Program
   {
-    const int MAX_ATTEMPTS = 10;
-    const int TIMEOUT = 10000;
+    const int MAX_ATTEMPTS = 50;
+    const int TIMEOUT = 2000;
     static int requestID;
     static String username;
     static String password;
@@ -31,6 +31,25 @@ namespace COMP28112ex2
         Console.Error.WriteLine("Error reading settings file: " + e.Message);
         Environment.Exit(0);
       }
+      Console.Out.WriteLine("Select server:");
+      Console.Out.WriteLine("(H)otel");
+      Console.Out.WriteLine("(B)and");
+      string server = Console.In.ReadLine();
+      if (server.ToUpper() == "H")
+        server = urlHotel;
+      else if (server.ToUpper() == "B")
+        server = urlBand;
+      else if (server.ToUpper() == "P")
+      {
+        reservePair();
+        Console.In.ReadLine();
+        Environment.Exit(0);
+      }
+      else
+      {
+        Console.Out.WriteLine("Not a valid server.");
+        Environment.Exit(0);
+      }
       Console.Out.WriteLine("Choose operation:");
       Console.Out.WriteLine("0: Reserve a slot.");
       Console.Out.WriteLine("1: Cancel a slot.");
@@ -41,19 +60,24 @@ namespace COMP28112ex2
       {
         case (int)QueryType.reserve:
           Console.Out.WriteLine("Reserve which slot?");
-          int slot = Convert.ToInt32(Console.In.ReadLine());
-          Console.Out.WriteLine(makeReservation(slot));
+          int targetSlot = Convert.ToInt32(Console.In.ReadLine());
+          Console.Out.WriteLine(makeReservation(targetSlot, server));
           break;
         case (int)QueryType.cancel:
           Console.Out.WriteLine("Cancel which slot?");
-          slot = Convert.ToInt32(Console.In.ReadLine());
-          Console.Out.WriteLine(cancelReservation(slot));
+          targetSlot = Convert.ToInt32(Console.In.ReadLine());
+          Console.Out.WriteLine(cancelReservation(targetSlot, server));
           break;
         case (int)QueryType.availability:
-          Console.Out.WriteLine(getFreeSlots());
+          List<int> freeSlots = getFreeSlots(server);
+          Console.Out.WriteLine("The following slots are available:");
+          foreach (int slot in freeSlots)
+            Console.Out.WriteLine(slot);
           break;
         case (int)QueryType.bookings:
-          Console.Out.WriteLine(getClientSlots());
+          List<int> bookedSlots = getClientSlots(server);
+          foreach (int slot in bookedSlots)
+            Console.Out.WriteLine(slot);
           break;
         default:
           Console.Out.WriteLine("Invalid option.");
@@ -84,7 +108,6 @@ namespace COMP28112ex2
         request.Method = "PUT";
         request.ContentType = "text/xml";
         request.Accept = "application/xml";
-        request.Timeout = TIMEOUT;
 
         Stream dataStream = request.GetRequestStream();
         dataStream.Write(arr, 0, arr.Length);
@@ -117,7 +140,7 @@ namespace COMP28112ex2
     {
       HttpWebResponse response = null;
       int attempts = 0;
-      do
+      while (true)
       {
         HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
         try
@@ -146,7 +169,7 @@ namespace COMP28112ex2
             System.Threading.Thread.Sleep(TIMEOUT);
           }
         }
-      } while (attempts < MAX_ATTEMPTS);
+      };
       return null;
     }
 
@@ -160,52 +183,21 @@ namespace COMP28112ex2
 
       using (xmlWrite)
       {
-          xmlWrite.WriteStartElement(Enum.GetName(typeof(QueryType), type));
-          xmlWrite.WriteElementString("request_id", requestID.ToString());
-          xmlWrite.WriteElementString("username", username);
-          xmlWrite.WriteElementString("password", password);
-          if (type == (int)QueryType.reserve || type == (int)QueryType.cancel)
-            xmlWrite.WriteElementString("slot_id", slotID.ToString());
-          xmlWrite.WriteEndElement();
+        xmlWrite.WriteStartElement(Enum.GetName(typeof(QueryType), type));
+        xmlWrite.WriteElementString("request_id", requestID.ToString());
+        xmlWrite.WriteElementString("username", username);
+        xmlWrite.WriteElementString("password", password);
+        if (type == (int)QueryType.reserve || type == (int)QueryType.cancel)
+          xmlWrite.WriteElementString("slot_id", slotID.ToString());
+        xmlWrite.WriteEndElement();
       }
       return requestString.ToString();
     }
 
-    static string makeReservation(int slotID)
+    static bool makeReservation(int slotID, string url)
     {
       Console.Out.WriteLine("Sending reservation request for slot " + slotID);
-      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.reserve, slotID), urlBand);
-      if (responsePUT != null)
-      {
-        Console.Out.WriteLine("Request sent.");
-        String responseText = ""; 
-        using (XmlReader reader = getReader(responsePUT))
-        {
-          reader.ReadToFollowing("msg_uri");
-          responseText = (reader.ReadElementContentAsString() + "?username=" + username + "&password=" + password);
-        }
-        Console.Out.WriteLine("Retrieving server response.");
-        HttpWebResponse responseGET = getRequestStatus(responseText);
-        if (responseGET != null)
-        {
-          using (XmlReader reader = getReader(responseGET))
-          {
-             reader.ReadToFollowing("code");
-            if (reader.ReadElementContentAsString() == "200")
-              responseText = "Slot " + slotID + " has been booked.";
-            else 
-              responseText = reader.ReadElementContentAsString();
-          }
-          return responseText;
-        }
-      }
-      return "Operation failed.\n";
-    }
-
-    static string cancelReservation(int slotID)
-    {
-      Console.Out.WriteLine("Cancelling reservation in slot " + slotID);
-      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.cancel, slotID), urlBand);
+      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.reserve, slotID), url);
       if (responsePUT != null)
       {
         Console.Out.WriteLine("Request sent.");
@@ -218,9 +210,198 @@ namespace COMP28112ex2
         Console.Out.WriteLine("Retrieving server response.");
         HttpWebResponse responseGET = getRequestStatus(responseText);
         if (responseGET != null)
-          return "The reservation has been cancelled";
+        {
+          using (XmlReader reader = getReader(responseGET))
+          {
+            reader.ReadToFollowing("code");
+            if (reader.ReadElementContentAsString() == "200")
+              responseText = "Slot " + slotID + " has been booked.";
+            else
+              responseText = reader.ReadElementContentAsString();
+          }
+          return true;
+        }
       }
-      return "Operation failed.\n";
+      return false;
+    }
+
+    static bool cancelReservation(int slotID, string url)
+    {
+      Console.Out.WriteLine("Cancelling reservation in slot " + slotID);
+      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.cancel, slotID), url);
+      if (responsePUT != null)
+      {
+        Console.Out.WriteLine("Request sent.");
+        String responseText = "";
+        using (XmlReader reader = getReader(responsePUT))
+        {
+          reader.ReadToFollowing("msg_uri");
+          responseText = (reader.ReadElementContentAsString() + "?username=" + username + "&password=" + password);
+        }
+        Console.Out.WriteLine("Retrieving server response.");
+        HttpWebResponse responseGET = getRequestStatus(responseText);
+        if (responseGET != null)
+          return true;
+      }
+      return false;
+    }
+
+    static List<int> getFreeSlots(string url)
+    {
+      Console.Out.WriteLine("Requesting available slots.");
+      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.availability, 0), url);
+      if (responsePUT != null)
+      {
+        Console.Out.WriteLine("Request sent.");
+        String responseText = "";
+        using (XmlReader reader = getReader(responsePUT))
+        {
+          reader.ReadToFollowing("msg_uri");
+          responseText = (reader.ReadElementContentAsString() + "?username=" + username + "&password=" + password);
+        }
+        Console.Out.WriteLine("Retrieving server response.");
+        HttpWebResponse responseGET = getRequestStatus(responseText);
+        if (responseGET != null)
+        {
+          List<int> freeSlots = new List<int>();
+          using (XmlReader reader = getReader(responseGET))
+          {
+            responseText = "The following slots are free:\n";
+            reader.ReadToFollowing("slot_id");
+            do
+            {
+              freeSlots.Add(reader.ReadElementContentAsInt());
+            } while (reader.IsStartElement("slot_id"));
+          }
+          return freeSlots;
+        }
+      }
+      return null;
+    }
+
+    static List<int> getClientSlots(string url)
+    {
+      Console.Out.WriteLine("Requesting slots booked by this client.");
+      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.bookings, 0), url);
+      if (responsePUT != null)
+      {
+        Console.Out.WriteLine("Request sent.");
+        String responseText = "";
+        using (XmlReader reader = getReader(responsePUT))
+        {
+          reader.ReadToFollowing("msg_uri");
+          responseText = (reader.ReadElementContentAsString() + "?username=" + username + "&password=" + password);
+        }
+        Console.Out.WriteLine("Retrieving server response.");
+        HttpWebResponse responseGET = getRequestStatus(responseText);
+        if (responseGET != null)
+        {
+          List<int> bookedSlots = new List<int>();
+          using (XmlReader reader = getReader(responseGET))
+          {
+            responseText = "The following slots are booked by this client:\n";
+            if (reader.ReadToFollowing("slot_id"))
+              do
+              {
+                bookedSlots.Add(reader.ReadElementContentAsInt());
+              } while (reader.IsStartElement("slot_id"));
+          }
+          return bookedSlots;
+        }
+      }
+      return null;
+    }
+
+    static int reservePair()
+    {
+      List<int> bookedBandSlots = getClientSlots(urlBand);
+      List<int> bookedHotelSlots = getClientSlots(urlHotel);
+      foreach (int slot in bookedBandSlots)
+        cancelReservation(slot, urlBand);
+      foreach (int slot in bookedHotelSlots)
+        cancelReservation(slot, urlHotel);
+
+        List<int> avlbBandSlots; 
+        List<int> avlbHotelSlots;
+        List<int> rsvdBandSlots = new List<int>();
+        List<int> rsvdHotelSlots = new List<int>();
+
+        //Loop until a pair has been found.
+        while (true)
+        {
+          //Loop until a band slot has been booked.
+          while (true)
+          {
+            //Get the available band slots
+            avlbBandSlots = getFreeSlots(urlBand);
+            //Find the lowest slot number
+            int slotMin = avlbBandSlots.Min();
+
+            //If no slots are booked, try to get the lowest.
+            if (rsvdHotelSlots.Count == 0)
+              if (makeReservation(slotMin, urlBand))
+              {
+                rsvdBandSlots.Add(slotMin);
+                break;
+              }
+
+            //If this hotel slot is already reserved, try to book it. If sucessful the earliest pair is found.
+            if (rsvdHotelSlots.Contains(slotMin))
+              if (makeReservation(slotMin, urlBand))
+                return slotMin;
+
+            //If the lowest slot is less than the current reserved band slot, try to book it. If it gets booked, cancel the higher slot.
+            if (slotMin < rsvdBandSlots.Min())
+              if (makeReservation(slotMin, urlBand))
+              {
+                rsvdBandSlots.Add(slotMin);
+                cancelReservation(rsvdBandSlots.Max(), urlBand);
+                rsvdBandSlots.Remove(rsvdBandSlots.Max());
+                break;
+              }
+          }
+          while (true)
+          {
+            avlbHotelSlots = getFreeSlots(urlHotel);
+            int slotMin = avlbHotelSlots.Min();
+
+            if (rsvdHotelSlots.Count == 0)
+              if (makeReservation(slotMin, urlBand))
+              {
+                rsvdBandSlots.Add(slotMin);
+                break;
+              }
+
+            if (rsvdBandSlots.Contains(slotMin))
+              if (makeReservation(slotMin, urlHotel))
+                return slotMin;
+
+            if (slotMin < rsvdHotelSlots.Min())
+              if (makeReservation(slotMin, urlHotel))
+              {
+                rsvdHotelSlots.Add(slotMin);
+                cancelReservation(rsvdHotelSlots.Max(), urlHotel);
+                rsvdBandSlots.Remove(rsvdHotelSlots.Max());
+                break;
+              }
+          }
+        }
+          /*
+          
+          {
+            slotsHotel = getFreeSlots(urlHotel);
+            int slotHotelMin = slotsHotel.Min();
+          }
+          for (int slotIndex = 0; slotIndex < Math.Min(slotsBand.Count, slotsHotel.Count); slotIndex++)
+            if (slotsHotel.Contains(slotsBand[slotIndex]))
+              targetSlot = slotIndex;
+        }
+        if (makeReservation(targetSlot, urlBand))
+          if (makeReservation(targetSlot, urlHotel))
+            return targetSlot;
+          else
+            cancelReservation(targetSlot, urlBand);
+        attempts++; */
     }
 
     static XmlReader getReader(HttpWebResponse response)
@@ -228,68 +409,5 @@ namespace COMP28112ex2
       return XmlReader.Create(new StringReader(new StreamReader(response.GetResponseStream()).ReadToEnd()));
     }
 
-    static string getFreeSlots()
-    {
-      Console.Out.WriteLine("Requesting available slots.");
-      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.availability, 0), urlBand);
-      if (responsePUT != null)
-      {
-        Console.Out.WriteLine("Request sent.");
-        String responseText = "";
-        using (XmlReader reader = getReader(responsePUT))
-        {
-          reader.ReadToFollowing("msg_uri");
-          responseText = (reader.ReadElementContentAsString() + "?username=" + username + "&password=" + password);
-        }
-        Console.Out.WriteLine("Retrieving server response.");
-        HttpWebResponse responseGET = getRequestStatus(responseText);
-        if (responseGET != null)
-        {
-          using (XmlReader reader = getReader(responseGET))
-          {
-            responseText = "The following slots are free:\n";
-            reader.ReadToFollowing("slot_id");
-            do
-            {
-              responseText += reader.ReadElementContentAsString() + "\n";
-            } while (reader.IsStartElement("slot_id"));
-          }
-          return responseText;
-        }
-      }
-      return "Operation failed.\n";
-    }
-
-    static string getClientSlots()
-    {
-      Console.Out.WriteLine("Requesting slots booked by this client.");
-      HttpWebResponse responsePUT = sendRequest(buildRequest((int)QueryType.bookings, 0), urlBand);
-      if (responsePUT != null)
-      {
-        Console.Out.WriteLine("Request sent.");
-        String responseText = "";
-        using (XmlReader reader = getReader(responsePUT))
-        {
-          reader.ReadToFollowing("msg_uri");
-          responseText = (reader.ReadElementContentAsString() + "?username=" + username + "&password=" + password);
-        }
-        Console.Out.WriteLine("Retrieving server response.");
-        HttpWebResponse responseGET = getRequestStatus(responseText);
-        if (responseGET != null)
-        {
-          using (XmlReader reader = getReader(responseGET))
-          {
-            responseText = "The following slots are booked by this client:\n";
-            if (reader.ReadToFollowing("slot_id"))
-              do
-              {
-                responseText += reader.ReadElementContentAsString() + "\n";
-              } while (reader.IsStartElement("slot_id"));
-          }
-          return responseText;
-        }
-      }
-      return "Operation failed.\n";
-    }
   }
 }
