@@ -178,7 +178,7 @@ namespace COMP28112ex2
       if (responsePUT != null)
       {
         Console.Out.WriteLine("Request sent.");
-        String responseText = "";
+        String responseText = ""; 
         using (XmlReader reader = getReader(responsePUT))
         {
           reader.ReadToFollowing("msg_uri");
