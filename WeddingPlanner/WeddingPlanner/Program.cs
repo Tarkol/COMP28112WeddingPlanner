@@ -93,8 +93,6 @@ namespace COMP28112ex2
       requestID = Convert.ToInt32(File.ReadAllText("../../requestID.txt"));
       urlHotel = WeddingPlanner.Properties.Resources.urlHotel;
       urlBand = WeddingPlanner.Properties.Resources.urlBand;
-
-      File.WriteAllText("../../requestID.txt", (requestID + 1).ToString());
     }
 
     static HttpWebResponse sendRequest(String message, String url)
@@ -108,11 +106,12 @@ namespace COMP28112ex2
         request.Method = "PUT";
         request.ContentType = "text/xml";
         request.Accept = "application/xml";
-        request.Timeout = TIMEOUT;
 
         Stream dataStream = request.GetRequestStream();
         dataStream.Write(arr, 0, arr.Length);
         dataStream.Close();
+
+        incrementID();
 
         try
         {
@@ -141,7 +140,7 @@ namespace COMP28112ex2
     {
       HttpWebResponse response = null;
       int attempts = 0;
-      do
+      while (true)
       {
         HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
         try
@@ -170,7 +169,7 @@ namespace COMP28112ex2
             System.Threading.Thread.Sleep(TIMEOUT);
           }
         }
-      } while (attempts < MAX_ATTEMPTS);
+      };
       return null;
     }
 
@@ -184,13 +183,13 @@ namespace COMP28112ex2
 
       using (xmlWrite)
       {
-          xmlWrite.WriteStartElement(Enum.GetName(typeof(QueryType), type));
-          xmlWrite.WriteElementString("request_id", requestID.ToString());
-          xmlWrite.WriteElementString("username", username);
-          xmlWrite.WriteElementString("password", password);
-          if (type == (int)QueryType.reserve || type == (int)QueryType.cancel)
-            xmlWrite.WriteElementString("slot_id", slotID.ToString());
-          xmlWrite.WriteEndElement();
+        xmlWrite.WriteStartElement(Enum.GetName(typeof(QueryType), type));
+        xmlWrite.WriteElementString("request_id", requestID.ToString());
+        xmlWrite.WriteElementString("username", username);
+        xmlWrite.WriteElementString("password", password);
+        if (type == (int)QueryType.reserve || type == (int)QueryType.cancel)
+          xmlWrite.WriteElementString("slot_id", slotID.ToString());
+        xmlWrite.WriteEndElement();
       }
       return requestString.ToString();
     }
@@ -214,10 +213,10 @@ namespace COMP28112ex2
         {
           using (XmlReader reader = getReader(responseGET))
           {
-             reader.ReadToFollowing("code");
+            reader.ReadToFollowing("code");
             if (reader.ReadElementContentAsString() == "200")
               responseText = "Slot " + slotID + " has been booked.";
-            else 
+            else
               responseText = reader.ReadElementContentAsString();
           }
           return true;
@@ -315,36 +314,93 @@ namespace COMP28112ex2
 
     static int reservePair()
     {
-      int attempts = 0;
       List<int> bookedBandSlots = getClientSlots(urlBand);
       List<int> bookedHotelSlots = getClientSlots(urlHotel);
-      if (bookedBandSlots.Count >= 2 || bookedHotelSlots.Count >= 2)
-        return 0;
+      foreach (int slot in bookedBandSlots)
+        cancelReservation(slot, urlBand);
+      foreach (int slot in bookedHotelSlots)
+        cancelReservation(slot, urlHotel);
 
-      while (attempts < MAX_ATTEMPTS)
+      List<int> avlbBandSlots;
+      List<int> avlbHotelSlots;
+      List<int> rsvdBandSlots = new List<int>();
+      List<int> rsvdHotelSlots = new List<int>();
+
+      //Loop until a pair has been found. what is this an infinity simulator
+      while (true)
       {
-        List<int> slotsBand = getFreeSlots(urlBand);
-        List<int> slotsHotel = getFreeSlots(urlHotel);
-        int targetSlot = 0;
-        for (int slotIndex = 0; slotIndex < Math.Min(slotsBand.Count, slotsHotel.Count); slotIndex++)
-          if (slotsHotel.Contains(slotsBand[slotIndex]))
-          {
-            targetSlot = slotIndex;
-            break;
-          }
-        if (makeReservation(targetSlot, urlBand))
-          if (makeReservation(targetSlot, urlHotel))
-            return targetSlot;
-          else
-            cancelReservation(targetSlot, urlBand);
-        attempts++;
+        //Loop until a band slot has been booked.
+        while (true)
+        {
+          //Get the available band slots
+          avlbBandSlots = getFreeSlots(urlBand);
+          //Find the lowest slot number
+          int slotMin = avlbBandSlots.Min();
+
+          //If no slots are booked, try to get the lowest.
+          if (rsvdHotelSlots.Count == 0)
+            if (makeReservation(slotMin, urlBand))
+            {
+              rsvdBandSlots.Add(slotMin);
+              break;
+            }
+
+          //If this hotel slot is already reserved, try to book it. If sucessful the earliest pair is found.
+          if (rsvdHotelSlots.Contains(slotMin))
+            if (makeReservation(slotMin, urlBand))
+              return slotMin;
+
+          //If the lowest slot is less than the current reserved band slot, try to book it. If it gets booked, cancel the higher slot.
+          if (slotMin < rsvdBandSlots.Min())
+            if (makeReservation(slotMin, urlBand))
+            {
+              rsvdBandSlots.Add(slotMin);
+              cancelReservation(rsvdBandSlots.Max(), urlBand);
+              rsvdBandSlots.Remove(rsvdBandSlots.Max());
+              break;
+            }
         }
-      return 0;
+        while (true)
+        {
+          avlbHotelSlots = getFreeSlots(urlHotel);
+          int slotMin = avlbHotelSlots.Min();
+
+          if (rsvdHotelSlots.Count == 0)
+            if (makeReservation(slotMin, urlBand))
+            {
+              rsvdBandSlots.Add(slotMin);
+              break;
+            }
+
+          if (rsvdBandSlots.Contains(slotMin))
+            if (makeReservation(slotMin, urlHotel))
+              return slotMin;
+
+          if (slotMin < rsvdHotelSlots.Min())
+            if (makeReservation(slotMin, urlHotel))
+            {
+              rsvdHotelSlots.Add(slotMin);
+              cancelReservation(rsvdHotelSlots.Max(), urlHotel);
+              rsvdBandSlots.Remove(rsvdHotelSlots.Max());
+              break;
+            }
+        }
+      }
+      
+      //Get available slots from hotal end band
+      //find lowest common
+      //
     }
 
     static XmlReader getReader(HttpWebResponse response)
     {
-        return XmlReader.Create(new StringReader(new StreamReader(response.GetResponseStream()).ReadToEnd()));
+      return XmlReader.Create(new StringReader(new StreamReader(response.GetResponseStream()).ReadToEnd()));
+    }
+
+    static void incrementID()
+    {
+      requestID++;
+      File.WriteAllText("../../requestID.txt", (requestID + 1).ToString());
     }
 
   }
