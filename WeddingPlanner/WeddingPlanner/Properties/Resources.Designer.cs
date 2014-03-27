@@ -90,9 +90,9 @@ namespace WeddingPlanner.Properties {
         /// <summary>
         ///   Looks up a localized string similar to cg2037.
         /// </summary>
-        internal static string userName {
+        internal static string username {
             get {
-                return ResourceManager.GetString("userName", resourceCulture);
+                return ResourceManager.GetString("username", resourceCulture);
             }
         }
     }

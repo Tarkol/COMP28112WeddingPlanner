@@ -126,7 +126,7 @@
   <data name="urlHotel" xml:space="preserve">
     <value>http://rpc248.cs.man.ac.uk:3010/queue/enqueue</value>
   </data>
-  <data name="userName" xml:space="preserve">
+  <data name="username" xml:space="preserve">
     <value>cg2037</value>
   </data>
 </root>
